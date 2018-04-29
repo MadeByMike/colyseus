@@ -1,19 +1,19 @@
-import * as fossilDelta from 'fossil-delta';
-import * as msgpack from 'notepack.io';
-import * as shortid from 'shortid';
+import * as fossilDelta from "fossil-delta";
+import * as msgpack from "notepack.io";
+import * as shortid from "shortid";
 
-import {createTimeline, Timeline} from '@gamestdio/timeline';
-import Clock from '@gamestdio/timer';
-import {EventEmitter} from 'events';
+import { createTimeline, Timeline } from "@gamestdio/timeline";
+import Clock from "@gamestdio/timer";
+import { EventEmitter } from "events";
 
-import {Client} from './index';
-import {Presence} from './presence/Presence';
-import {RemoteClient} from './presence/RemoteClient';
-import {decode, Protocol, send} from './Protocol';
-import {logError, spliceOne} from './Utils';
+import { Client } from "./index";
+import { Presence } from "./presence/Presence";
+import { RemoteClient } from "./presence/RemoteClient";
+import { decode, Protocol, send } from "./Protocol";
+import { logError, spliceOne } from "./Utils";
 
-import * as jsonPatch from 'fast-json-patch'; // this is only used for debugging patches
-import {debugError, debugPatch, debugPatchData} from './Debug';
+import * as jsonPatch from "fast-json-patch"; // this is only used for debugging patches
+import { debugError, debugPatch, debugPatchData } from "./Debug";
 
 const DEFAULT_PATCH_RATE = 1000 / 20; // 20fps (50ms)
 const DEFAULT_SIMULATION_INTERVAL = 1000 / 60; // 60fps (16.66ms)
@@ -52,12 +52,13 @@ export abstract class Room<T = any> extends EventEmitter {
   public presence: Presence;
 
   public clients: Client[] = [];
-  protected remoteClients: {[sessionId: string]: RemoteClient} = {};
+  protected remoteClients: { [sessionId: string]: RemoteClient } = {};
 
   // when a new user connects, it receives the '_previousState', which holds
   // the last binary snapshot other users already have, therefore the patches
   // that follow will be the same for all clients.
   private _previousState: any;
+  private _previousStateEncoded: any;
 
   private _simulationInterval: NodeJS.Timer;
   private _patchInterval: NodeJS.Timer;
@@ -85,7 +86,11 @@ export abstract class Room<T = any> extends EventEmitter {
 
   // Optional abstract methods
   public onInit?(options: any): void;
-  public onJoin?(client: Client, options?: any, auth?: any): void | Promise<any>;
+  public onJoin?(
+    client: Client,
+    options?: any,
+    auth?: any
+  ): void | Promise<any>;
   public onLeave?(client: Client): void | Promise<any>;
   public onDispose?(): void | Promise<any>;
 
@@ -106,7 +111,10 @@ export abstract class Room<T = any> extends EventEmitter {
     return this.clients.length + connectingClients >= this.maxClients;
   }
 
-  public setSimulationInterval(callback: SimulationCallback, delay: number = DEFAULT_SIMULATION_INTERVAL): void {
+  public setSimulationInterval(
+    callback: SimulationCallback,
+    delay: number = DEFAULT_SIMULATION_INTERVAL
+  ): void {
     // clear previous interval in case called setSimulationInterval more than once
     if (this._simulationInterval) {
       clearInterval(this._simulationInterval);
@@ -125,7 +133,10 @@ export abstract class Room<T = any> extends EventEmitter {
     }
 
     if (milliseconds !== null && milliseconds !== 0) {
-      this._patchInterval = setInterval(this.broadcastPatch.bind(this), milliseconds);
+      this._patchInterval = setInterval(
+        this.broadcastPatch.bind(this),
+        milliseconds
+      );
     }
   }
 
@@ -136,7 +147,10 @@ export abstract class Room<T = any> extends EventEmitter {
   public setState(newState) {
     this.clock.start();
 
-    this._previousState = Object.assign({}, newState);
+    this._previousState = newState;
+    // ensure state is populated for `sendState()` method.
+    this._previousStateEncoded = msgpack.encode(this._previousState);
+
     this.state = newState;
 
     if (this.timeline) {
@@ -157,7 +171,7 @@ export abstract class Room<T = any> extends EventEmitter {
       return;
     }
 
-    this.emit('lock');
+    this.emit("lock");
 
     this._locked = true;
   }
@@ -173,7 +187,7 @@ export abstract class Room<T = any> extends EventEmitter {
       return;
     }
 
-    this.emit('unlock');
+    this.emit("unlock");
 
     this._locked = false;
   }
@@ -198,7 +212,7 @@ export abstract class Room<T = any> extends EventEmitter {
       const client = this.clients[numClients];
 
       if (!options || options.except !== client) {
-        client.send(data, {binary: true}, logError.bind(this));
+        client.send(data, { binary: true }, logError.bind(this));
       }
     }
 
@@ -230,10 +244,17 @@ export abstract class Room<T = any> extends EventEmitter {
   }
 
   protected sendState(client: Client): void {
-    const clientState = this.clientView(client, this.state);
+    const clientState = this.clientView(
+      client,
+      msgpack.decode(this._previousStateEncoded)
+    );
     const clientStateEncoded = msgpack.encode(clientState);
-    const previousClientStateEncoded = msgpack.encode(clientState);
-    send(client, [Protocol.ROOM_STATE, clientStateEncoded, this.clock.currentTime, this.clock.elapsedTime]);
+    send(client, [
+      Protocol.ROOM_STATE,
+      clientStateEncoded,
+      this.clock.currentTime,
+      this.clock.elapsedTime
+    ]);
   }
 
   protected broadcastPatch(): boolean {
@@ -241,7 +262,9 @@ export abstract class Room<T = any> extends EventEmitter {
       this.clock.tick();
     }
     if (!this.state) {
-      debugPatch('trying to broadcast null state. you should call #setState on constructor or during user connection.');
+      debugPatch(
+        "trying to broadcast null state. you should call #setState on constructor or during user connection."
+      );
       return false;
     }
 
@@ -257,32 +280,54 @@ export abstract class Room<T = any> extends EventEmitter {
     while (numClients--) {
       const client = this.clients[numClients];
       const clientState = this.clientView(client, currentState);
-      const previousClientState = this.clientView(client, this._previousState);
       const clientStateEncoded = msgpack.encode(clientState);
+      const previousClientState = this.clientView(
+        client,
+        msgpack.decode(this._previousStateEncoded)
+      );
       const previousClientStateEncoded = msgpack.encode(previousClientState);
 
       // skip if state has not changed.
       if (clientStateEncoded.equals(previousClientStateEncoded)) {
         continue;
       }
+
       patchesSent = true;
-      const patches = fossilDelta.create(previousClientStateEncoded, clientStateEncoded);
+      const patches = fossilDelta.create(
+        previousClientStateEncoded,
+        clientStateEncoded
+      );
 
       //
       // debugging
       //
       if (debugPatch.enabled) {
-        debugPatch(`"%s" (roomId: "%s") is sending %d bytes:`, this.roomName, this.roomId, patches.length);
+        debugPatch(
+          `"%s" (roomId: "%s") is sending %d bytes:`,
+          this.roomName,
+          this.roomId,
+          patches.length
+        );
       }
 
       if (debugPatchData.enabled) {
-        debugPatchData('%j', jsonPatch.compare(msgpack.decode(previousClientStateEncoded), currentState));
+        debugPatchData(
+          "%j",
+          jsonPatch.compare(
+            msgpack.decode(previousClientStateEncoded),
+            currentState
+          )
+        );
       }
 
       // broadcast patches (diff state) to all clients,
-      client.send(msgpack.encode([Protocol.ROOM_STATE_PATCH, patches]), {binary: true}, logError.bind(this));
+      client.send(
+        msgpack.encode([Protocol.ROOM_STATE_PATCH, patches]),
+        { binary: true },
+        logError.bind(this)
+      );
     }
-    /// TS_IGNORE
+
     this._previousState = Object.assign({}, currentState);
     return patchesSent;
   }
@@ -290,7 +335,7 @@ export abstract class Room<T = any> extends EventEmitter {
   protected _disposeIfEmpty() {
     if (this.clients.length === 0) {
       this._dispose();
-      this.emit('dispose');
+      this.emit("dispose");
     }
   }
 
@@ -319,12 +364,14 @@ export abstract class Room<T = any> extends EventEmitter {
     const remoteClient = this.remoteClients[sessionId];
 
     if (!remoteClient) {
-      debugError(`trying to send event ("${event}") to non-existing remote client (${sessionId})`);
+      debugError(
+        `trying to send event ("${event}") to non-existing remote client (${sessionId})`
+      );
       return;
     }
 
-    if (typeof event !== 'string') {
-      remoteClient.emit('message', new Buffer(event));
+    if (typeof event !== "string") {
+      remoteClient.emit("message", new Buffer(event));
     } else {
       remoteClient.emit(event);
     }
@@ -334,7 +381,9 @@ export abstract class Room<T = any> extends EventEmitter {
     message = decode(message);
 
     if (!message) {
-      debugError(`${this.roomName} (${this.roomId}), couldn't decode message: ${message}`);
+      debugError(
+        `${this.roomName} (${this.roomId}), couldn't decode message: ${message}`
+      );
       return;
     }
 
@@ -369,11 +418,11 @@ export abstract class Room<T = any> extends EventEmitter {
     send(client, [Protocol.JOIN_ROOM, client.sessionId]);
 
     // emit 'join' to room handler
-    this.emit('join', client);
+    this.emit("join", client);
 
     // bind onLeave method.
-    client.on('message', this._onMessage.bind(this, client));
-    client.once('close', this._onLeave.bind(this, client));
+    client.on("message", this._onMessage.bind(this, client));
+    client.once("close", this._onLeave.bind(this, client));
 
     // send current state when new client joins the room
     if (this.state) {
@@ -393,7 +442,7 @@ export abstract class Room<T = any> extends EventEmitter {
       userReturnData = this.onLeave(client);
     }
 
-    this.emit('leave', client);
+    this.emit("leave", client);
 
     // remove remote client reference
     if (client instanceof RemoteClient) {
