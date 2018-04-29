@@ -1,19 +1,12 @@
-import * as assert from "assert";
-import * as msgpack from "notepack.io";
+import * as assert from 'assert';
+import * as msgpack from 'notepack.io';
 import * as sinon from 'sinon';
-import { Room } from "../src/Room";
-import { Protocol } from "../src/Protocol";
-import {
-  createDummyClient,
-  DummyRoom,
-  DummyRoomWithTimeline,
-  DummyRoomWithState
-} from "./utils/mock";
+import {Room} from '../src/Room';
+import {Protocol} from '../src/Protocol';
+import {createDummyClient, DummyRoom, DummyRoomWithTimeline, DummyRoomWithState, DummyRoomWithClientView} from './utils/mock';
 
 describe('Room', function() {
-
   describe('#constructor', function() {
-
     it('should instantiate with valid options', function() {
       var room = new DummyRoom();
       assert.ok(room instanceof DummyRoom);
@@ -23,7 +16,6 @@ describe('Room', function() {
       var room = new DummyRoomWithTimeline();
       assert.equal(0, room.timeline.history.length);
     });
-
   });
 
   describe('#onJoin/#onLeave', function() {
@@ -61,10 +53,10 @@ describe('Room', function() {
       var client = createDummyClient();
 
       (<any>room)._onJoin(client);
-      assert.equal(typeof((<any>room)._patchInterval._repeat), "number");
+      assert.equal(typeof (<any>room)._patchInterval._repeat, 'number');
 
-      room.on('dispose', function() {;
-        assert.equal(typeof((<any>room)._patchInterval._repeat), "object");
+      room.on('dispose', function() {
+        assert.equal(typeof (<any>room)._patchInterval._repeat, 'object');
         done();
       });
 
@@ -75,17 +67,17 @@ describe('Room', function() {
   describe('patch interval', function() {
     it('should set default "patch" interval', function() {
       var room = new DummyRoom();
-      assert.equal("object", typeof((<any>room)._patchInterval));
-      assert.equal(1000 / 20, (<any>room)._patchInterval._idleTimeout, "default patch rate should be 20");
+      assert.equal('object', typeof (<any>room)._patchInterval);
+      assert.equal(1000 / 20, (<any>room)._patchInterval._idleTimeout, 'default patch rate should be 20');
     });
 
     it('should disable "patch" interval', function() {
       var room = new DummyRoom();
-      
+
       room.setPatchRate(null);
 
-      assert.equal("object", typeof ((<any>room)._patchInterval));
-      assert.equal(-1, (<any>room)._patchInterval._idleTimeout, "patch rate should be disabled; set to -1");
+      assert.equal('object', typeof (<any>room)._patchInterval);
+      assert.equal(-1, (<any>room)._patchInterval._idleTimeout, 'patch rate should be disabled; set to -1');
     });
   });
 
@@ -95,16 +87,15 @@ describe('Room', function() {
       let client = createDummyClient();
       (<any>room)._onJoin(client, {});
 
-      room.setState({ success: true });
+      room.setState({success: true});
 
       // first message
       (<any>room).sendState(client);
 
-
-      var message = msgpack.decode( client.messages[1] );
+      var message = msgpack.decode(client.messages[1]);
 
       assert.equal(message[0], Protocol.ROOM_STATE);
-      assert.deepEqual(msgpack.decode(message[1]), { success: true });
+      assert.deepEqual(msgpack.decode(message[1]), {success: true});
     });
   });
 
@@ -122,11 +113,11 @@ describe('Room', function() {
       let client3 = createDummyClient();
       (<any>room)._onJoin(client3, {});
 
-      room.broadcast("data");
+      room.broadcast('data');
 
-      assert.equal("data", client1.lastMessage[1]);
-      assert.equal("data", client2.lastMessage[1]);
-      assert.equal("data", client3.lastMessage[1]);
+      assert.equal('data', client1.lastMessage[1]);
+      assert.equal('data', client2.lastMessage[1]);
+      assert.equal('data', client3.lastMessage[1]);
     });
 
     it('should broadcast data to all clients, except the provided client', function() {
@@ -142,10 +133,10 @@ describe('Room', function() {
       let client3 = createDummyClient();
       (<any>room)._onJoin(client3, {});
 
-      room.broadcast("data", { except: client3 });
+      room.broadcast('data', {except: client3});
 
-      assert.equal("data", client1.lastMessage[1]);
-      assert.equal("data", client2.lastMessage[1]);
+      assert.equal('data', client1.lastMessage[1]);
+      assert.equal('data', client2.lastMessage[1]);
       assert.equal(undefined, client3.lastMessage[1]);
     });
   });
@@ -189,9 +180,9 @@ describe('Room', function() {
       assert.equal(true, (<any>room).broadcastPatch());
     });
 
-    it('shouldn\'t broadcast clean state (no patches)', function() {
+    it("shouldn't broadcast clean state (no patches)", function() {
       var room = new DummyRoom();
-      room.setState({ one: 1 });
+      room.setState({one: 1});
 
       // create 2 dummy connections with the room
       var client = createDummyClient();
@@ -228,13 +219,25 @@ describe('Room', function() {
       assert.equal(message[0], Protocol.ROOM_STATE_PATCH);
       assert.deepEqual(message[1].length, 22);
 
-      assert.deepEqual(message[1], [ 66, 10, 66, 58, 130, 163, 111, 110, 101, 1, 163, 116, 119, 111, 2, 49, 86, 53, 49, 74, 89, 59 ]);
+      assert.deepEqual(message[1], [66, 10, 66, 58, 130, 163, 111, 110, 101, 1, 163, 116, 119, 111, 2, 49, 86, 53, 49, 74, 89, 59]);
+    });
+
+    it('should filter data via clientView', function() {
+      var room = new DummyRoomWithClientView();
+      room.setState({one: 1, secret: 'hidden'});
+
+      // create 2 dummy connections with the room
+      var client = createDummyClient();
+      (<any>room)._onJoin(client, {});
+
+      // ROOM_STATE message should not contain {secret: 'hidden'}
+      var message = msgpack.decode(client.messages[1]);
+      assert.deepEqual(Array.from(message[1]), [129, 163, 111, 110, 101, 1]);
     });
   });
 
-  describe("#disconnect", () => {
-
-    it("should disconnect all clients", () => {
+  describe('#disconnect', () => {
+    it('should disconnect all clients', () => {
       let room = new DummyRoom();
 
       // connect 10 clients
@@ -250,7 +253,7 @@ describe('Room', function() {
       assert.deepEqual(room.clients, {});
     });
 
-    it("should allow asynchronous disconnects", (done) => {
+    it('should allow asynchronous disconnects', done => {
       let room = new DummyRoom();
 
       let clock = sinon.useFakeTimers();
@@ -277,7 +280,5 @@ describe('Room', function() {
       clock.runAll();
       done();
     });
-
   });
-
 });
