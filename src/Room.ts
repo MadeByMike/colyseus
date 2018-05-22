@@ -1,19 +1,19 @@
-import * as fossilDelta from "fossil-delta";
-import * as msgpack from "notepack.io";
-import * as shortid from "shortid";
+import * as fossilDelta from 'fossil-delta';
+import * as msgpack from 'notepack.io';
+import * as shortid from 'shortid';
 
-import { createTimeline, Timeline } from "@gamestdio/timeline";
-import Clock from "@gamestdio/timer";
-import { EventEmitter } from "events";
+import { createTimeline, Timeline } from '@gamestdio/timeline';
+import Clock from '@gamestdio/timer';
+import { EventEmitter } from 'events';
 
-import { Client } from "./index";
-import { Presence } from "./presence/Presence";
-import { RemoteClient } from "./presence/RemoteClient";
-import { decode, Protocol, send } from "./Protocol";
-import { logError, spliceOne } from "./Utils";
+import { Client } from './index';
+import { Presence } from './presence/Presence';
+import { RemoteClient } from './presence/RemoteClient';
+import { decode, Protocol, send } from './Protocol';
+import { logError, spliceOne } from './Utils';
 
-import * as jsonPatch from "fast-json-patch"; // this is only used for debugging patches
-import { debugError, debugPatch, debugPatchData } from "./Debug";
+import * as jsonPatch from 'fast-json-patch'; // this is only used for debugging patches
+import { debugError, debugPatch, debugPatchData } from './Debug';
 
 const DEFAULT_PATCH_RATE = 1000 / 20; // 20fps (50ms)
 const DEFAULT_SIMULATION_INTERVAL = 1000 / 60; // 60fps (16.66ms)
@@ -21,7 +21,7 @@ const DEFAULT_SIMULATION_INTERVAL = 1000 / 60; // 60fps (16.66ms)
 export type SimulationCallback = (deltaTime?: number) => void;
 
 export interface RoomConstructor<T = any> {
-  new (presence?: Presence): Room<T>;
+  new(presence?: Presence): Room<T>;
 }
 
 export interface RoomAvailable {
@@ -54,11 +54,7 @@ export abstract class Room<T = any> extends EventEmitter {
   public clients: Client[] = [];
   protected remoteClients: { [sessionId: string]: RemoteClient } = {};
 
-  // when a new user connects, it receives the '_previousState', which holds
-  // the last binary snapshot other users already have, therefore the patches
-  // that follow will be the same for all clients.
-  private _previousState: any;
-  private _previousStateEncoded: any;
+  private _previousClientViewStateEncoded: any[] = [];
 
   private _simulationInterval: NodeJS.Timer;
   private _patchInterval: NodeJS.Timer;
@@ -89,7 +85,7 @@ export abstract class Room<T = any> extends EventEmitter {
   public onJoin?(
     client: Client,
     options?: any,
-    auth?: any
+    auth?: any,
   ): void | Promise<any>;
   public onLeave?(client: Client): void | Promise<any>;
   public onDispose?(): void | Promise<any>;
@@ -113,7 +109,7 @@ export abstract class Room<T = any> extends EventEmitter {
 
   public setSimulationInterval(
     callback: SimulationCallback,
-    delay: number = DEFAULT_SIMULATION_INTERVAL
+    delay: number = DEFAULT_SIMULATION_INTERVAL,
   ): void {
     // clear previous interval in case called setSimulationInterval more than once
     if (this._simulationInterval) {
@@ -135,7 +131,7 @@ export abstract class Room<T = any> extends EventEmitter {
     if (milliseconds !== null && milliseconds !== 0) {
       this._patchInterval = setInterval(
         this.broadcastPatch.bind(this),
-        milliseconds
+        milliseconds,
       );
     }
   }
@@ -147,9 +143,14 @@ export abstract class Room<T = any> extends EventEmitter {
   public setState(newState) {
     this.clock.start();
 
-    this._previousState = newState;
-    // ensure state is populated for `sendState()` method.
-    this._previousStateEncoded = msgpack.encode(this._previousState);
+    let numClients = this.clients.length;
+    while (numClients--) {
+      const client = this.clients[numClients];
+      this._previousClientViewStateEncoded[client.id] = msgpack.encode(this.clientView(
+        client,
+        newState,
+      ));
+    }
 
     this.state = newState;
 
@@ -171,7 +172,7 @@ export abstract class Room<T = any> extends EventEmitter {
       return;
     }
 
-    this.emit("lock");
+    this.emit('lock');
 
     this._locked = true;
   }
@@ -187,7 +188,7 @@ export abstract class Room<T = any> extends EventEmitter {
       return;
     }
 
-    this.emit("unlock");
+    this.emit('unlock');
 
     this._locked = false;
   }
@@ -199,7 +200,7 @@ export abstract class Room<T = any> extends EventEmitter {
   public broadcast(data: any, options?: BroadcastOptions): boolean {
     // no data given, try to broadcast patched state
     if (!data) {
-      throw new Error("Room#broadcast: 'data' is required to broadcast.");
+      throw new Error('Room#broadcast: \'data\' is required to broadcast.');
     }
 
     // encode all messages with msgpack
@@ -224,7 +225,7 @@ export abstract class Room<T = any> extends EventEmitter {
       clients: this.clients.length,
       maxClients: this.maxClients,
       metadata: this.metadata,
-      roomId: this.roomId
+      roomId: this.roomId,
     };
   }
 
@@ -244,16 +245,24 @@ export abstract class Room<T = any> extends EventEmitter {
   }
 
   protected sendState(client: Client): void {
-    const clientState = this.clientView(
-      client,
-      msgpack.decode(this._previousStateEncoded)
-    );
-    const clientStateEncoded = msgpack.encode(clientState);
+
+    // If we don't have a previous client state set to currrent state
+    if (!this._previousClientViewStateEncoded[client.id]) {
+      this._previousClientViewStateEncoded[client.id] = msgpack.encode(this.clientView(
+        client,
+        this.state,
+      ));
+    }
+
+    const previousClientViewStateEncoded = this._previousClientViewStateEncoded[
+      client.id
+    ];
+
     send(client, [
       Protocol.ROOM_STATE,
-      clientStateEncoded,
+      previousClientViewStateEncoded,
       this.clock.currentTime,
-      this.clock.elapsedTime
+      this.clock.elapsedTime,
     ]);
   }
 
@@ -262,9 +271,7 @@ export abstract class Room<T = any> extends EventEmitter {
       this.clock.tick();
     }
     if (!this.state) {
-      debugPatch(
-        "trying to broadcast null state. you should call #setState on constructor or during user connection."
-      );
+      debugPatch('trying to broadcast null state. you should call #setState on constructor or during user connection.');
       return false;
     }
 
@@ -279,44 +286,43 @@ export abstract class Room<T = any> extends EventEmitter {
     let numClients = this.clients.length;
     while (numClients--) {
       const client = this.clients[numClients];
+      const previousClientViewStateEncoded =
+        this._previousClientViewStateEncoded[client.id];
+
       const clientState = this.clientView(client, currentState);
       const clientStateEncoded = msgpack.encode(clientState);
-      const previousClientState = this.clientView(
-        client,
-        msgpack.decode(this._previousStateEncoded)
-      );
-      const previousClientStateEncoded = msgpack.encode(previousClientState);
 
       // skip if state has not changed.
-      if (clientStateEncoded.equals(previousClientStateEncoded)) {
+      if (clientStateEncoded.equals(previousClientViewStateEncoded)) {
         continue;
       }
 
       patchesSent = true;
       const patches = fossilDelta.create(
-        previousClientStateEncoded,
-        clientStateEncoded
+        previousClientViewStateEncoded,
+        clientStateEncoded,
       );
+
+      this._previousClientViewStateEncoded[
+        client.id
+      ] = clientStateEncoded;
 
       //
       // debugging
       //
       if (debugPatch.enabled) {
         debugPatch(
-          `"%s" (roomId: "%s") is sending %d bytes:`,
+          `'%s' (roomId: '%s') is sending %d bytes:`,
           this.roomName,
           this.roomId,
-          patches.length
+          patches.length,
         );
       }
 
       if (debugPatchData.enabled) {
         debugPatchData(
-          "%j",
-          jsonPatch.compare(
-            msgpack.decode(previousClientStateEncoded),
-            currentState
-          )
+          '%j',
+          jsonPatch.compare(msgpack.decode(previousClientViewStateEncoded), clientState),
         );
       }
 
@@ -324,18 +330,17 @@ export abstract class Room<T = any> extends EventEmitter {
       client.send(
         msgpack.encode([Protocol.ROOM_STATE_PATCH, patches]),
         { binary: true },
-        logError.bind(this)
+        logError.bind(this),
       );
     }
 
-    this._previousState = Object.assign({}, currentState);
     return patchesSent;
   }
 
   protected _disposeIfEmpty() {
     if (this.clients.length === 0) {
       this._dispose();
-      this.emit("dispose");
+      this.emit('dispose');
     }
   }
 
@@ -364,14 +369,12 @@ export abstract class Room<T = any> extends EventEmitter {
     const remoteClient = this.remoteClients[sessionId];
 
     if (!remoteClient) {
-      debugError(
-        `trying to send event ("${event}") to non-existing remote client (${sessionId})`
-      );
+      debugError(`trying to send event ('${event}') to non-existing remote client (${sessionId})`);
       return;
     }
 
-    if (typeof event !== "string") {
-      remoteClient.emit("message", new Buffer(event));
+    if (typeof event !== 'string') {
+      remoteClient.emit('message', new Buffer(event));
     } else {
       remoteClient.emit(event);
     }
@@ -381,9 +384,7 @@ export abstract class Room<T = any> extends EventEmitter {
     message = decode(message);
 
     if (!message) {
-      debugError(
-        `${this.roomName} (${this.roomId}), couldn't decode message: ${message}`
-      );
+      debugError(`${this.roomName} (${this.roomId}), couldn't decode message: ${message}`);
       return;
     }
 
@@ -398,7 +399,7 @@ export abstract class Room<T = any> extends EventEmitter {
     // create remote client instance.
     if (client.remote) {
       client = new RemoteClient(client, this.roomId, this.presence) as any;
-      this.remoteClients[client.sessionId] = client as any;
+      this.remoteClients[client.id] = client as any;
     }
 
     this.clients.push(client);
@@ -415,14 +416,14 @@ export abstract class Room<T = any> extends EventEmitter {
     }
 
     // confirm room id that matches the room name requested to join
-    send(client, [Protocol.JOIN_ROOM, client.sessionId]);
+    send(client, [Protocol.JOIN_ROOM, client.id]);
 
     // emit 'join' to room handler
-    this.emit("join", client);
+    this.emit('join', client);
 
     // bind onLeave method.
-    client.on("message", this._onMessage.bind(this, client));
-    client.once("close", this._onLeave.bind(this, client));
+    client.on('message', this._onMessage.bind(this, client));
+    client.once('close', this._onLeave.bind(this, client));
 
     // send current state when new client joins the room
     if (this.state) {
@@ -442,11 +443,11 @@ export abstract class Room<T = any> extends EventEmitter {
       userReturnData = this.onLeave(client);
     }
 
-    this.emit("leave", client);
+    this.emit('leave', client);
 
     // remove remote client reference
     if (client instanceof RemoteClient) {
-      delete this.remoteClients[client.sessionId];
+      delete this.remoteClients[client.id];
     }
 
     // custom cleanup method & clear intervals

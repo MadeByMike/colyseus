@@ -1,25 +1,25 @@
 import * as assert from 'assert';
 import * as msgpack from 'notepack.io';
 import * as sinon from 'sinon';
-import {Room} from '../src/Room';
-import {Protocol} from '../src/Protocol';
-import {createDummyClient, DummyRoom, DummyRoomWithTimeline, DummyRoomWithState, DummyRoomWithClientView} from './utils/mock';
+import { Room } from '../src/Room';
+import { Protocol } from '../src/Protocol';
+import { createDummyClient, DummyRoom, DummyRoomWithTimeline, DummyRoomWithState, DummyRoomWithClientView } from './utils/mock';
 
-describe('Room', function() {
-  describe('#constructor', function() {
-    it('should instantiate with valid options', function() {
+describe('Room', function () {
+  describe('#constructor', function () {
+    it('should instantiate with valid options', function () {
       var room = new DummyRoom();
       assert.ok(room instanceof DummyRoom);
     });
 
-    it('should instantiate with timeline attribute', function() {
+    it('should instantiate with timeline attribute', function () {
       var room = new DummyRoomWithTimeline();
       assert.equal(0, room.timeline.history.length);
     });
   });
 
-  describe('#onJoin/#onLeave', function() {
-    it('should receive onJoin messages', function() {
+  describe('#onJoin/#onLeave', function () {
+    it('should receive onJoin messages', function () {
       var room = new DummyRoom();
       var client = createDummyClient();
       var message = null;
@@ -32,7 +32,7 @@ describe('Room', function() {
       assert.equal(message[0], Protocol.JOIN_ROOM);
     });
 
-    it('should receive JOIN_ROOM and ROOM_STATE messages onJoin', function() {
+    it('should receive JOIN_ROOM and ROOM_STATE messages onJoin', function () {
       var room = new DummyRoomWithState();
       var client = createDummyClient();
       var message = null;
@@ -48,14 +48,14 @@ describe('Room', function() {
       assert.equal(message[0], Protocol.ROOM_STATE);
     });
 
-    it('should cleanup/dispose when all clients disconnect', function(done) {
+    it('should cleanup/dispose when all clients disconnect', function (done) {
       var room = new DummyRoom();
       var client = createDummyClient();
 
       (<any>room)._onJoin(client);
       assert.equal(typeof (<any>room)._patchInterval._repeat, 'number');
 
-      room.on('dispose', function() {
+      room.on('dispose', function () {
         assert.equal(typeof (<any>room)._patchInterval._repeat, 'object');
         done();
       });
@@ -64,14 +64,14 @@ describe('Room', function() {
     });
   });
 
-  describe('patch interval', function() {
-    it('should set default "patch" interval', function() {
+  describe('patch interval', function () {
+    it('should set default "patch" interval', function () {
       var room = new DummyRoom();
       assert.equal('object', typeof (<any>room)._patchInterval);
       assert.equal(1000 / 20, (<any>room)._patchInterval._idleTimeout, 'default patch rate should be 20');
     });
 
-    it('should disable "patch" interval', function() {
+    it('should disable "patch" interval', function () {
       var room = new DummyRoom();
 
       room.setPatchRate(null);
@@ -81,13 +81,13 @@ describe('Room', function() {
     });
   });
 
-  describe('#sendState', function() {
-    it('should send state when it is set up', function() {
+  describe('#sendState', function () {
+    it('should send state when it is set up', function () {
       let room = new DummyRoom();
       let client = createDummyClient();
       (<any>room)._onJoin(client, {});
 
-      room.setState({success: true});
+      room.setState({ success: true });
 
       // first message
       (<any>room).sendState(client);
@@ -95,12 +95,12 @@ describe('Room', function() {
       var message = msgpack.decode(client.messages[1]);
 
       assert.equal(message[0], Protocol.ROOM_STATE);
-      assert.deepEqual(msgpack.decode(message[1]), {success: true});
+      assert.deepEqual(msgpack.decode(message[1]), { success: true });
     });
   });
 
-  describe('#broadcast', function() {
-    it('should broadcast data to all clients', function() {
+  describe('#broadcast', function () {
+    it('should broadcast data to all clients', function () {
       let room = new DummyRoom();
 
       // connect 2 dummy clients into room
@@ -120,7 +120,7 @@ describe('Room', function() {
       assert.equal('data', client3.lastMessage[1]);
     });
 
-    it('should broadcast data to all clients, except the provided client', function() {
+    it('should broadcast data to all clients, except the provided client', function () {
       let room = new DummyRoom();
 
       // connect 2 dummy clients into room
@@ -133,16 +133,15 @@ describe('Room', function() {
       let client3 = createDummyClient();
       (<any>room)._onJoin(client3, {});
 
-      room.broadcast('data', {except: client3});
-
+      room.broadcast('data', { except: client3 });
       assert.equal('data', client1.lastMessage[1]);
       assert.equal('data', client2.lastMessage[1]);
-      assert.equal(undefined, client3.lastMessage[1]);
+      assert.equal(client3.id, client3.lastMessage[1]);
     });
   });
 
-  describe('#broadcastPatch', function() {
-    it('should fail to broadcast patch without state', function() {
+  describe('#broadcastPatch', function () {
+    it('should fail to broadcast patch without state', function () {
       let room = new DummyRoom();
 
       // connect 2 dummy clients into room
@@ -156,7 +155,7 @@ describe('Room', function() {
       assert.equal(false, (<any>room).broadcastPatch());
     });
 
-    it('should broadcast patch having state', function() {
+    it('should broadcast patch having state', function () {
       let room = new DummyRoom();
 
       // connect 2 dummy clients into room
@@ -167,8 +166,8 @@ describe('Room', function() {
       (<any>room)._onJoin(client2, {});
 
       // set state
-      room.setState({one: 1});
-      assert.deepEqual({one: 1}, room.state);
+      room.setState({ one: 1 });
+      assert.deepEqual({ one: 1 }, room.state);
 
       // clean state. no patches available!
       assert.equal(false, (<any>room).broadcastPatch());
@@ -180,9 +179,9 @@ describe('Room', function() {
       assert.equal(true, (<any>room).broadcastPatch());
     });
 
-    it("shouldn't broadcast clean state (no patches)", function() {
+    it("shouldn't broadcast clean state (no patches)", function () {
       var room = new DummyRoom();
-      room.setState({one: 1});
+      room.setState({ one: 1 });
 
       // create 2 dummy connections with the room
       var client = createDummyClient();
@@ -191,14 +190,14 @@ describe('Room', function() {
       var client2 = createDummyClient();
       (<any>room)._onJoin(client2, {});
 
-      assert.deepEqual({one: 1}, room.state);
+      assert.deepEqual({ one: 1 }, room.state);
 
       // clean state. no patches available!
       assert.equal(false, (<any>room).broadcastPatch());
 
       // change the state to make patch available
       room.state.two = 2;
-      assert.deepEqual({one: 1, two: 2}, room.state);
+      assert.deepEqual({ one: 1, two: 2 }, room.state);
 
       // voila!
       assert.equal(true, (<any>room).broadcastPatch());
@@ -222,9 +221,9 @@ describe('Room', function() {
       assert.deepEqual(message[1], [66, 10, 66, 58, 130, 163, 111, 110, 101, 1, 163, 116, 119, 111, 2, 49, 86, 53, 49, 74, 89, 59]);
     });
 
-    it('should filter data via clientView', function() {
+    it('should filter data via clientView', function () {
       var room = new DummyRoomWithClientView();
-      room.setState({one: 1, secret: 'hidden'});
+      room.setState({ one: 1, secret: 'hidden' });
 
       // create 2 dummy connections with the room
       var client = createDummyClient();
